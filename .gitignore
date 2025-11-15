@@ -1,0 +1,126 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Machine Learning Models (большие файлы)
+models/*.joblib
+models/*.pkl
+models/*.h5
+models/*.pt
+models/*.pth
+*.joblib
+*.pkl
+
+# Datasets (большие файлы)
+*.csv
+*.parquet
+*.tsv
+unified_news_pairs.*
+
+# Но оставляем JSON с разметками (они небольшие и важные)
+!news_duplicates/*.json
+!agreed_annotations_osokina_popov.json
+
+# Kaggle credentials
+kaggle.json
+
+# Logs
+*.log
+logs/
+*.out
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+.cache/
+
+# Training outputs
+training.txt
+checkpoints/
+
+# Hugging Face cache
+.cache/
+.huggingface/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter
+.ipynb_checkpoints
+
+# Environment variables
+.env
+.env.local
+
+# Exclude large data files
+*.zip
+*.tar.gz
+*.rar
+
+# TensorBoard
+runs/
+
