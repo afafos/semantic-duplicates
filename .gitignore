@@ -61,8 +61,9 @@ unified_news_pairs.*
 !news_duplicates/*.json
 !agreed_annotations_osokina_popov.json
 
-# Kaggle credentials
+# Kaggle credentials and cache
 kaggle.json
+.kaggle_cache/
 
 # Logs
 *.log

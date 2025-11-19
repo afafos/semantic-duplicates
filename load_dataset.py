@@ -2,11 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 Собирает единый размеченный датасет пар текстов для задачи дубликатов новостей.
-Источники: merionum/ru_paraphraser, GEM/opusparcus (RU), cointegrated/ru-paraphrase-NMT-Leipzig.
+Источники: 
+  - merionum/ru_paraphraser (HuggingFace)
+  - GEM/opusparcus (RU) (HuggingFace)
+  - cointegrated/ru-paraphrase-NMT-Leipzig (HuggingFace)
+  - viacheslavshalamov/russian-news-paraphrases-2020 (Kaggle)
 Выход: Parquet (+CSV опционально).
 
 Зависимости:
-  pip install -U datasets pandas pyarrow huggingface_hub python-dotenv
+  pip install -U datasets pandas pyarrow huggingface_hub python-dotenv kaggle
 
 python load_dataset.py --save ./unified_news_pairs.parquet --csv
 
@@ -15,15 +19,18 @@ python load_dataset.py --save ./unified_news_pairs.parquet --csv
 from __future__ import annotations
 import argparse
 import os
+import shutil
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
 import pandas as pd
 from datasets import load_dataset
 from huggingface_hub import hf_hub_download
+from kaggle.api.kaggle_api_extended import KaggleApi
 
 # ──────────────────────────────────────────────────────────────────────────────
-# .env / токены (только HF)
+# .env / токены (HF + Kaggle)
 # ──────────────────────────────────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv
@@ -32,7 +39,7 @@ except ImportError:
 
 
 def setup_auth():
-    """Загружает .env (HF_TOKEN) и логинит Hugging Face при наличии токена."""
+    """Загружает .env (HF_TOKEN) и логинит Hugging Face и Kaggle при наличии токенов."""
     if load_dotenv is not None:
         env_path = Path(__file__).with_name(".env")
         if env_path.exists():
@@ -43,6 +50,7 @@ def setup_auth():
     else:
         print(">> python-dotenv не установлен; пропускаю загрузку .env")
 
+    # HF authentication
     hf_token = os.getenv("HF_TOKEN")
     if hf_token:
         try:
@@ -53,6 +61,19 @@ def setup_auth():
             print(f">> Hugging Face login failed: {e}. Продолжу анонимно там, где можно.")
     else:
         print(">> HF_TOKEN не задан — датасеты с HF буду тянуть анонимно (если публичные)")
+    
+    # Kaggle authentication
+    kaggle_json_path = Path(__file__).with_name("kaggle.json")
+    if kaggle_json_path.exists():
+        kaggle_dir = Path.home() / ".kaggle"
+        kaggle_dir.mkdir(exist_ok=True)
+        target = kaggle_dir / "kaggle.json"
+        if not target.exists():
+            shutil.copy(kaggle_json_path, target)
+            target.chmod(0o600)
+        print(">> Kaggle: authenticated via kaggle.json")
+    else:
+        print(">> kaggle.json не найден — датасеты с Kaggle буду тянуть с системной конфигурацией")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Утилиты
@@ -251,6 +272,98 @@ def load_ru_paraphrase_nmt_leipzig(
         frames.append(_finalize(out, source="ru_paraphrase_nmt_leipzig"))
     return pd.concat(frames, ignore_index=True)
 
+
+def load_russian_news_paraphrases_2020(use_titles: bool = True) -> pd.DataFrame:
+    """
+    Kaggle: viacheslavshalamov/russian-news-paraphrases-2020
+    Датасет парафразов новостных заголовков на русском языке.
+    Содержит пары текстов с метками: 1=парафраз (дубликат), 0=не парафраз.
+    
+    Args:
+        use_titles: Если True, использует title_1/title_2 (краткие заголовки).
+                   Если False, использует text_1/text_2 (полные тексты).
+    """
+    print(">> Загрузка russian-news-paraphrases-2020 из Kaggle ...")
+    
+    # Инициализируем Kaggle API
+    api = KaggleApi()
+    api.authenticate()
+    
+    # Создаём временную директорию для загрузки
+    download_dir = Path(__file__).parent / ".kaggle_cache"
+    download_dir.mkdir(exist_ok=True)
+    
+    dataset_path = download_dir / "russian-news-paraphrases-2020"
+    
+    try:
+        # Скачиваем датасет, если его ещё нет
+        if not dataset_path.exists():
+            print(f">> Скачиваю датасет в {dataset_path} ...")
+            api.dataset_download_files(
+                "viacheslavshalamov/russian-news-paraphrases-2020",
+                path=str(dataset_path),
+                unzip=True
+            )
+        else:
+            print(f">> Датасет уже скачан в {dataset_path}")
+        
+        # Ищем XML файл с парафразами
+        xml_file = dataset_path / "Russian-news-paraphrases-2020.xml"
+        
+        if not xml_file.exists():
+            raise FileNotFoundError(f"Не найден файл {xml_file}")
+        
+        print(f">> Парсинг {xml_file.name}...")
+        
+        # Парсим XML
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
+        
+        data = []
+        text_field_1 = "title_1" if use_titles else "text_1"
+        text_field_2 = "title_2" if use_titles else "text_2"
+        
+        for paraphrase in root.findall(".//paraphrase"):
+            entry = {}
+            for value in paraphrase.findall("value"):
+                name = value.get("name")
+                text = value.text or ""
+                entry[name] = text
+            
+            # Извлекаем нужные поля
+            if text_field_1 in entry and text_field_2 in entry and "class" in entry:
+                # Преобразуем лемматизированный текст обратно в читаемый вид
+                # (заменяем ; на пробелы)
+                text1 = entry[text_field_1].replace(";", " ")
+                text2 = entry[text_field_2].replace(";", " ")
+                
+                try:
+                    label = int(entry["class"])
+                    if label in {0, 1}:
+                        data.append({
+                            "text1": text1,
+                            "text2": text2,
+                            "label": label
+                        })
+                except (ValueError, KeyError):
+                    continue
+        
+        if not data:
+            raise RuntimeError("Не удалось извлечь данные из XML файла")
+        
+        df = pd.DataFrame(data)
+        result = _finalize(df, source="kaggle_russian_news_paraphrases_2020")
+        
+        print(f">> Загружено {len(result)} пар из Kaggle датасета")
+        print(f"   Использованы поля: {text_field_1}, {text_field_2}")
+        print(f"   Распределение меток: {result['label'].value_counts().to_dict()}")
+        
+        return result
+        
+    except Exception as e:
+        print(f">> ОШИБКА при загрузке Kaggle датасета: {e}")
+        raise
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Оркестратор
 # ──────────────────────────────────────────────────────────────────────────────
@@ -258,6 +371,7 @@ def build_unified_dataset(
     include_paraphraser: bool = True,
     include_opusparcus: bool = True,
     include_leipzig: bool = True,
+    include_kaggle: bool = True,
     include_near_as_positive: bool = False,  # по умолчанию near НЕ считаем позитивом
     save_path: str = "./unified_news_pairs.parquet",
     also_save_csv: bool = False,
@@ -269,6 +383,8 @@ def build_unified_dataset(
         parts.append(load_opusparcus_ru())
     if include_leipzig:
         parts.append(load_ru_paraphrase_nmt_leipzig())
+    if include_kaggle:
+        parts.append(load_russian_news_paraphrases_2020())
 
     if not parts:
         raise RuntimeError("Нечего объединять: все источники отключены.")
@@ -298,10 +414,11 @@ def build_unified_dataset(
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Собрать единый датасет пар текстов для дедупликации новостей (без Kaggle)")
+    p = argparse.ArgumentParser(description="Собрать единый датасет пар текстов для дедупликации новостей")
     p.add_argument("--no-paraphraser", action="store_true", help="не включать merionum/ru_paraphraser")
     p.add_argument("--no-opusparcus", action="store_true", help="не включать GEM/opusparcus (RU)")
     p.add_argument("--no-leipzig", action="store_true", help="не включать cointegrated/ru-paraphrase-NMT-Leipzig")
+    p.add_argument("--no-kaggle", action="store_true", help="не включать Kaggle russian-news-paraphrases-2020")
     p.add_argument(
         "--near-as-positive",
         action="store_true",
@@ -319,6 +436,7 @@ if __name__ == "__main__":
         include_paraphraser=not args.no_paraphraser,
         include_opusparcus=not args.no_opusparcus,
         include_leipzig=not args.no_leipzig,
+        include_kaggle=not args.no_kaggle,
         include_near_as_positive=args.near_as_positive,
         save_path=args.save,
         also_save_csv=args.csv,
